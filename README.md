@@ -7,6 +7,10 @@ stacked hourglass nets in pytorch
 python train_classification.py --train-image-path ../FloorplanTransformation/pytorch/img_label_arr_train/ \
                                --val-image-path ../FloorplanTransformation/pytorch/img_label_arr_test/
 ```
+```
+python train_regression.py --augment --train-image-path ./data/ny_hei_train.txt \
+                           --val-image-path ./data/ny_hei_val.txt
+```
 
 ## Papers
 - [Stacked Hourglass Networks for Human Pose Estimation, ECCV 2016](https://arxiv.org/pdf/1603.06937.pdf)
