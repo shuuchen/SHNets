@@ -9,6 +9,6 @@ python train_classification.py --train-image-path ../FloorplanTransformation/pyt
 ```
 
 ## Papers
-[Stacked Hourglass Networks for Human Pose Estimation, ECCV 2016](https://arxiv.org/pdf/1603.06937.pdf)
-[Stacked U-Nets: A No-Frills Approach to Natural Image Segmentation](https://arxiv.org/pdf/1804.10343.pdf)
-[Stacked U-Nets for Ground Material Segmentation in Remote Sensing Imagery, CVPRW, 2018](http://openaccess.thecvf.com/content_cvpr_2018_workshops/papers/w4/Ghosh_Stacked_U-Nets_for_CVPR_2018_paper.pdf)
+- [Stacked Hourglass Networks for Human Pose Estimation, ECCV 2016](https://arxiv.org/pdf/1603.06937.pdf)
+- [Stacked U-Nets: A No-Frills Approach to Natural Image Segmentation](https://arxiv.org/pdf/1804.10343.pdf)
+- [Stacked U-Nets for Ground Material Segmentation in Remote Sensing Imagery, CVPRW, 2018](http://openaccess.thecvf.com/content_cvpr_2018_workshops/papers/w4/Ghosh_Stacked_U-Nets_for_CVPR_2018_paper.pdf)
