@@ -9,7 +9,7 @@ import pandas as pd
 
 from torchvision.utils import make_grid, save_image
 from torch.utils.data import DataLoader
-from models.res_unet_regressor import ResUNet
+from models import *
 from dataloader_regressor import *
 from tqdm import tqdm
 
@@ -28,20 +28,20 @@ def main(args):
 
         # if resume TODO
 
-        model = ResUNet(3, 1).to(device)
+        model = hg(num_stacks=4, num_blocks=4, num_classes=1).to(device)
         train(args, model, train_dataset, val_dataset)
 
     else: # test
         if not args.test_image_path: 
             raise 'test data path should be specified !'
         test_dataset = RoomDataset(file_path=args.test_image_path)
-        model = ResUNet(3, 1).to(device)
+        model = hg(num_stacks=4, num_blocks=4, num_classes=1).to(device)
         model.load_state_dict(torch.load(args.checkpoint + '/checkpoint_100.pth'))
         test(args, model, test_dataset)
 
 def train(args, model, train_dataset, val_dataset):
 
-    optimizer = torch.optim.Adam(params=model.parameters(), lr=0.001)
+    optimizer = torch.optim.Adam(params=model.parameters(), lr=0.001)#0.00002
     criterion = nn.L1Loss()
 
     # epoch-wise losses
@@ -68,7 +68,15 @@ def train(args, model, train_dataset, val_dataset):
             outputs = model(images)
     
             # loss
-            train_loss = criterion(outputs, labels)
+            train_loss = 0
+            if type(outputs) == list:
+                # intermediate supervision
+                for o in outputs:
+                    train_loss += criterion(o, labels)
+                outputs = outputs[-1]
+            else:
+                train_loss = criterion(outputs, labels)
+                
             batch_train_losses.append(train_loss.item())
         
             # backward
@@ -86,12 +94,12 @@ def train(args, model, train_dataset, val_dataset):
         eval_losses.append(eval_loss)
         
         # update output loss file after per epoch
-        df_loss.assign(train=train_losses, val=eval_losses).to_csv('./val_res_with_aug/loss_regression.csv')
+        df_loss.assign(train=train_losses, val=eval_losses).to_csv('./loss_regression.csv')
 
         # save model    
         if (epoch + 1) % 20 == 0:
-            torch.save(model.state_dict(), args.checkpoint + '/checkpoint_%d.pth' % (epoch + 1))
-            torch.save(optimizer.state_dict(), args.checkpoint + '/optim_%d.pth' % (epoch + 1))
+            torch.save(model.state_dict(), './checkpoint_%d.pth' % (epoch + 1))
+            torch.save(optimizer.state_dict(), './optim_%d.pth' % (epoch + 1))
 
         # update learning rate
         #if (epoch + 1) % 20 == 0:
@@ -120,20 +128,22 @@ def evaluate(args, model, criterion, val_dataset, epo_no):
 
             outputs = model(images)
             
-            loss = criterion(outputs, labels)
+            loss = 0            
+            if type(outputs) == list:
+                for o in outputs:
+                    loss += criterion(o, labels)
+                outputs = outputs[-1]
+            else:
+                loss = criterion(outputs, labels)
+                
             losses.append(loss.item())
         
         mean_val_loss = np.mean(losses)
 
-        np.save('./val_res_with_aug/val_images_%d.npy' % epo_no, images.cpu().numpy().astype(np.uint8))
-        np.save('./val_res_with_aug/val_labels_%d.npy' % epo_no, labels.cpu().numpy().astype(np.float32))
-        np.save('./val_res_with_aug/val_preds_%d.npy' % epo_no, outputs.cpu().numpy().astype(np.float32))
+        np.save('./val_images_%d.npy' % epo_no, images.cpu().numpy().astype(np.uint8))
+        np.save('./val_labels_%d.npy' % epo_no, labels.cpu().numpy().astype(np.float32))
+        np.save('./val_preds_%d.npy' % epo_no, outputs.cpu().numpy().astype(np.float32))
       
-        '''
-        save_image(make_grid(images.uint8()), './val_res/val_images_%d.png' % epo_no)
-        save_image(make_grid(labels), './val_res/val_labels_%d.png' % epo_no)
-        save_image(make_grid(outputs), './val_res/val_preds_%d.png' % epo_no)
-        '''
     return mean_val_loss
 
 def test(args, model, test_dataset):
