@@ -28,20 +28,20 @@ def main(args):
 
         # if resume TODO
 
-        model = hg(num_stacks=2, num_blocks=4, num_classes=12).to(device)
+        model = hg(num_stacks=4, num_blocks=4, num_classes=12).to(device)
         train(args, model, train_dataset, val_dataset)
 
     else: # test
         if not args.test_image_path: 
             raise 'test data path should be specified !'
         test_dataset = RoomDataset(file_path=args.test_image_path)
-        model = hg(num_stacks=2, num_blocks=4, num_classes=12).to(device)
+        model = hg(num_stacks=4, num_blocks=4, num_classes=12).to(device)
         model.load_state_dict(torch.load(args.checkpoint + '/checkpoint_100.pth'))
         test(args, model, test_dataset)
 
 def train(args, model, train_dataset, val_dataset):
 
-    optimizer = torch.optim.Adam(params=model.parameters(), lr=0.001)
+    optimizer = torch.optim.Adam(params=model.parameters(), lr=0.0003)
     criterion = nn.CrossEntropyLoss()
 
     # epoch-wise losses
