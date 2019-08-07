@@ -1,6 +1,7 @@
 import os
 import argparse
 import torch
+import shutil
 
 import torch.optim as optim
 import torch.nn as nn
@@ -11,6 +12,7 @@ from torchvision.utils import make_grid, save_image
 from torch.utils.data import DataLoader
 from models import *
 from dataloader_classifier import *
+from loss import *
 from tqdm import tqdm
 
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
@@ -26,22 +28,40 @@ def main(args):
         if args.val_image_path:
             val_dataset = RoomDataset(file_path=args.val_image_path)
 
-        # if resume TODO
-
         model = hg(num_stacks=4, num_blocks=4, num_classes=12).to(device)
-        train(args, model, train_dataset, val_dataset)
+        optimizer = torch.optim.Adam(params=model.parameters(), lr=0.0003)
+
+        if args.resume:
+            if not os.path.isfile(args.resume):
+                raise '=> no checkpoint found at %s' % args.resume
+            checkpoint = torch.load(args.resume)
+            args.start_epoch = checkpoint['epoch']
+            args.best_loss = checkpoint['best_loss']
+            model.load_state_dict(checkpoint['state_dict'])
+            optimizer.load_state_dict(checkpoint['optimizer'])
+            print('=> loaded checkpoint %s (epoch %d)' % (args.resume, args.start_epoch))
+
+        train(args, model, optimizer, train_dataset, val_dataset)
 
     else: # test
         if not args.test_image_path: 
-            raise 'test data path should be specified !'
-        test_dataset = RoomDataset(file_path=args.test_image_path)
+            raise '=> test data path should be specified'
+        if not args.resume or not os.path.isfile(args.resume):
+            raise '=> resume not specified or no checkpoint found'
+        test_dataset = RoomDataset(file_path=args.test_image_path, train=False)
         model = hg(num_stacks=4, num_blocks=4, num_classes=12).to(device)
-        model.load_state_dict(torch.load(args.checkpoint + '/checkpoint_100.pth'))
+        checkpoint = torch.load(args.resume)
+        model.load_state_dict(checkpoint['state_dict'])
         test(args, model, test_dataset)
 
-def train(args, model, train_dataset, val_dataset):
 
-    optimizer = torch.optim.Adam(params=model.parameters(), lr=0.0003)
+def save_checkpoint(state, is_best, filename='checkpoint.pth.tar'):
+    torch.save(state, filename)
+    if is_best:
+        shutil.copyfile(filename, 'model_best.pth.tar')
+
+def train(args, model, optimizer, train_dataset, val_dataset):
+
     criterion = nn.CrossEntropyLoss()
 
     # epoch-wise losses
@@ -53,10 +73,10 @@ def train(args, model, train_dataset, val_dataset):
                                       dataset=train_dataset, num_workers=args.workers)
     
     df_loss = pd.DataFrame()
-    best_loss = np.float('inf')
+    best_loss = args.best_loss
 
     for epoch in range(args.epochs):
-        print('training epoch %d/%s' % (epoch+1, args.epochs))
+        print('training epoch %d/%s' % (args.start_epoch+epoch+1, args.start_epoch+args.epochs))
         batch_train_losses = []
         data_iterator = tqdm(dataloader, total=len(train_dataset) // args.batch_size + 1)
         for i, (images, labels) in enumerate(data_iterator):
@@ -67,17 +87,21 @@ def train(args, model, train_dataset, val_dataset):
             labels = labels.to(device)
         
             outputs = model(images)
-    
+            
             # loss
             train_loss = 0
             if type(outputs) == list:
                 # intermediate supervision
                 for o in outputs:
                     train_loss += criterion(o, labels)
+                    #train_loss += depth_loss(labels, o) + gradient_loss(labels, o)
                 outputs = outputs[-1]
             else:
                 train_loss = criterion(outputs, labels)
-
+                #train_loss = depth_loss(labels, outputs) + gradient_loss(labels, outputs)
+    
+            # loss
+            #train_loss = criterion(outputs, labels)
             batch_train_losses.append(train_loss.item())
         
             # backward
@@ -90,23 +114,24 @@ def train(args, model, train_dataset, val_dataset):
         print('mean train loss: %.4f' % epo_train_loss)
         train_losses.append(epo_train_loss)
         
-        eval_loss = evaluate(args, model, criterion, val_dataset, epoch+1)
-        print('mean val loss: %.4f' % eval_loss)
-        eval_losses.append(eval_loss)
+        epo_eval_loss = evaluate(args, model, criterion, val_dataset, args.start_epoch+epoch+1)
+        print('mean val loss: %.4f' % epo_eval_loss)
+        eval_losses.append(epo_eval_loss)
         
         # update output loss file after per epoch
-        df_loss.assign(train=train_losses, val=eval_losses).to_csv('./loss_classification.csv')
+        df_loss.assign(train=train_losses, val=eval_losses).to_csv('./loss_regression.csv')
 
-        # save model    
-        if (epoch + 1) % 50 == 0:
-            torch.save(model.state_dict(), './checkpoint_%d.pth' % (epoch + 1))
-            torch.save(optimizer.state_dict(), './optim_%d.pth' % (epoch + 1))
-
-        # save best model    
-        if epo_train_loss < best_loss:
-            best_loss = epo_train_loss
-            torch.save(model.state_dict(), './checkpoint_best.pth')
-            torch.save(optimizer.state_dict(), './optim_best.pth')
+        # save model
+        is_best = False
+        if epo_eval_loss < best_loss:
+            best_loss = epo_eval_loss
+            is_best = True
+        save_checkpoint({
+            'epoch': args.start_epoch+epoch+1,
+            'best_loss': best_loss,
+            'state_dict': model.state_dict(),
+            'optimizer': optimizer.state_dict(),
+        }, is_best)
         
         # update learning rate
         #if (epoch + 1) % 20 == 0:
@@ -132,28 +157,29 @@ def evaluate(args, model, criterion, val_dataset, epo_no):
 
             images = images.to(device)
             labels = labels.to(device)
-
+            
             outputs = model(images)
-
+            
+            # loss
             loss = 0            
             if type(outputs) == list:
                 for o in outputs:
                     loss += criterion(o, labels)
+                    #loss += depth_loss(labels, o) + gradient_loss(labels, o)
                 outputs = outputs[-1]
             else:
                 loss = criterion(outputs, labels)
-
+                #loss = depth_loss(labels, outputs) + gradient_loss(labels, outputs)
+            
             losses.append(loss.item())
         
         mean_val_loss = np.mean(losses)
 
         if epo_no % 10 == 0:
-            outputs = torch.argmax(outputs, dim=1)
-
-            np.save('./val_images_%d.npy' % epo_no, images.cpu().numpy())
+            np.save('./val_images_%d.npy' % epo_no, images.cpu().numpy().astype(np.uint8))
             np.save('./val_labels_%d.npy' % epo_no, labels.cpu().numpy())
             np.save('./val_preds_%d.npy' % epo_no, outputs.cpu().numpy())
-      
+            
     return mean_val_loss
 
 def test(args, model, test_dataset):
@@ -163,16 +189,17 @@ def test(args, model, test_dataset):
     model.eval()
     with torch.no_grad():
         data_iterator = tqdm(dataloader, total=len(test_dataset) // args.batch_size + 1)
-        for images, labels in data_iterator:
-
+        for images, img_name in data_iterator:
+            print(img_name); exit(1)
             images = images.to(device)
             labels = labels.to(device)
 
             outputs = model(images)
             np.save('xxx.npy', outputs)
 
+
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='PyTorch UNet Training')
+    parser = argparse.ArgumentParser(description='PyTorch SHNet Training')
 
     # Task setting
     parser.add_argument('--task', default='train', type=str,
@@ -224,6 +251,11 @@ if __name__ == '__main__':
                         help='evaluate model on validation set')
     parser.add_argument('-d', '--debug', dest='debug', action='store_true',
                         help='show intermediate results')
+    parser.add_argument('--best-loss', type=float, default=np.float('inf'),
+                        help='best (minimum) loss of current model.')
+    parser.add_argument('--start-epoch', type=int, default=0,
+                        help='trained epoch of current model.')
+
 
 
     main(parser.parse_args())
